@@ -176,14 +176,20 @@ self.onmessage = async (e) => {
   const msg = e.data;
   if (msg.type === "load") {
     const MODEL = "onnx-community/Qwen2.5-0.5B-Instruct"; // 軽量モデルに統一
-    const attempts = msg.hasWebGPU
-      ? [
-          { device: "webgpu", dtype: "q4", label: "GPU (WebGPU) / Qwen2.5-0.5B / q4" },
-          { device: "wasm",   dtype: "q8", label: "CPU (WASM) / Qwen2.5-0.5B ※GPU利用不可のため降格" }
-        ]
-      : [
-          { device: "wasm", dtype: "q8", label: "CPU (WASM) / Qwen2.5-0.5B" }
-        ];
+    let attempts;
+    if (msg.forced) {
+      // 前回成功した構成が分かっている場合はそれだけを試す（無駄な再ダウンロードを避ける）
+      attempts = [msg.forced];
+    } else {
+      attempts = msg.hasWebGPU
+        ? [
+            { device: "webgpu", dtype: "q4", label: "GPU (WebGPU) / Qwen2.5-0.5B / q4" },
+            { device: "wasm",   dtype: "q8", label: "CPU (WASM) / Qwen2.5-0.5B ※GPU利用不可のため降格" }
+          ]
+        : [
+            { device: "wasm", dtype: "q8", label: "CPU (WASM) / Qwen2.5-0.5B" }
+          ];
+    }
     let lastErr;
     for (const a of attempts) {
       try {
@@ -193,7 +199,7 @@ self.onmessage = async (e) => {
           dtype: a.dtype,
           progress_callback: (p) => self.postMessage({ type: "progress", p })
         });
-        self.postMessage({ type: "ready", label: a.label, wasm: a.device === "wasm" });
+        self.postMessage({ type: "ready", label: a.label, wasm: a.device === "wasm", device: a.device, dtype: a.dtype });
         return;
       } catch (err) {
         lastErr = err;
@@ -231,6 +237,7 @@ const worker = new Worker(URL.createObjectURL(new Blob([workerSrc], { type: "tex
 let messages = [{ role: "system", content: SYSTEM_PROMPT }];
 let currentBodyEl = null;
 let ready = false;
+let triedFullFallback = false;
 
 async function detectWebGPU(){
   if(!("gpu" in navigator)) return false;
@@ -258,13 +265,21 @@ worker.onmessage = (e) => {
     loadbar.style.width = "100%";
     statusWrap.querySelector("#loadbar-wrap").style.opacity = "0.5";
     ready = true;
+    try { localStorage.setItem("fumin_config", JSON.stringify({ device: msg.device, dtype: msg.dtype, label: msg.label })); } catch(_) {}
     input.disabled = false;
     sendBtn.disabled = false;
     input.focus();
     addMsg("不眠", "起動完了です、ありがとうございます☺️ 今日もよろしくお願いします。……あ、ちなみに「寝る」というご相談でしたら、先にお断りしておきますね。", "ai");
   } else if (msg.type === "load_error") {
-    loadstatus.textContent = "起動失敗（全構成で失敗）: " + msg.message;
-    diag.style.display = "block";
+    try { localStorage.removeItem("fumin_config"); } catch(_) {}
+    if (!triedFullFallback) {
+      // 記憶していた構成がダメだった場合、記憶を捨てて全構成でリトライ
+      triedFullFallback = true;
+      detectWebGPU().then((hasWebGPU) => worker.postMessage({ type: "load", hasWebGPU }));
+    } else {
+      loadstatus.textContent = "起動失敗（全構成で失敗）: " + msg.message;
+      diag.style.display = "block";
+    }
   } else if (msg.type === "token") {
     if (currentBodyEl) {
       currentBodyEl.textContent = msg.full;
@@ -282,7 +297,14 @@ worker.onmessage = (e) => {
   }
 };
 
-detectWebGPU().then((hasWebGPU) => worker.postMessage({ type: "load", hasWebGPU }));
+let savedConfig = null;
+try { savedConfig = JSON.parse(localStorage.getItem("fumin_config") || "null"); } catch(_) {}
+if (savedConfig) {
+  triedFullFallback = true; // 保存済み構成が失敗したら即フル構成にフォールバックさせる
+  worker.postMessage({ type: "load", forced: savedConfig });
+} else {
+  detectWebGPU().then((hasWebGPU) => worker.postMessage({ type: "load", hasWebGPU }));
+}
 
 form.addEventListener("submit", (e) => {
   e.preventDefault();

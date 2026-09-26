@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>不眠 - 絶対に寝かせないAI</title>
+<style>
+  :root{
+    --bg:#0f0d0a;
+    --panel:#171310;
+    --amber:#ffb000;
+    --amber-dim:#7a5a1f;
+    --text:#e8e0d0;
+    --text-dim:#9c8f78;
+    --danger:#ff5544;
+    --mono:'JetBrains Mono','SFMono-Regular',Consolas,Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:var(--mono);
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+  }
+  body::before{
+    content:"";
+    position:fixed;inset:0;
+    background:repeating-linear-gradient(0deg,rgba(255,176,0,0.025) 0px,rgba(255,176,0,0.025) 1px,transparent 1px,transparent 3px);
+    pointer-events:none;
+  }
+  header{ width:100%;max-width:760px;padding:28px 20px 10px; }
+  header .tag{color:var(--amber-dim);font-size:12px;letter-spacing:1px}
+  header h1{ margin:4px 0 2px;font-size:26px;color:var(--amber);
+    text-shadow:0 0 8px rgba(255,176,0,0.35); }
+  header p{color:var(--text-dim);font-size:13px;margin:0;line-height:1.6}
+
+  #status{ width:100%;max-width:760px;padding:0 20px; }
+  #loadbar-wrap{
+    border:1px solid var(--amber-dim);background:var(--panel);
+    padding:10px 12px;margin-top:10px;font-size:12px;color:var(--text-dim);
+    display:flex;flex-direction:column;gap:6px;
+  }
+  #loadbar-outer{height:6px;background:#241c12;overflow:hidden}
+  #loadbar-inner{height:100%;width:0%;background:var(--amber);transition:width .2s}
+  #devicebadge{font-size:11px;color:var(--amber-dim)}
+
+  #diag{
+    display:none;border:1px solid var(--danger);background:#1a100d;
+    padding:10px 12px;margin-top:8px;font-size:12px;color:var(--text-dim);line-height:1.7;
+  }
+  #diag b{color:var(--danger)}
+  #diag code{color:var(--amber)}
+
+  #chat{
+    flex:1;width:100%;max-width:760px;padding:14px 20px;
+    overflow-y:auto;display:flex;flex-direction:column;gap:14px;
+  }
+  .msg{max-width:85%;line-height:1.7;font-size:14.5px;white-space:pre-wrap}
+  .msg .who{font-size:11px;letter-spacing:1px;margin-bottom:3px;opacity:.65}
+  .msg.user{align-self:flex-end;text-align:right}
+  .msg.user .who{color:var(--text-dim)}
+  .msg.user .body{color:var(--text)}
+  .msg.ai{align-self:flex-start}
+  .msg.ai .who{color:var(--amber)}
+  .msg.ai .body{color:var(--text)}
+  .msg.ai .body::before{content:"> "}
+
+  form{ width:100%;max-width:760px;padding:14px 20px 22px; display:flex;gap:8px; }
+  input[type=text]{
+    flex:1;background:var(--panel);border:1px solid var(--amber-dim);
+    color:var(--text);font-family:var(--mono);font-size:14px;
+    padding:12px 14px;outline:none;
+  }
+  input[type=text]:focus{border-color:var(--amber)}
+  input[type=text]:disabled{opacity:.4}
+  button{
+    background:var(--amber);color:#171310;border:none;
+    font-family:var(--mono);font-weight:bold;font-size:14px;
+    padding:0 20px;cursor:pointer;
+  }
+  button:disabled{background:var(--amber-dim);cursor:not-allowed}
+  button:hover:not(:disabled){filter:brightness(1.1)}
+
+  footer{ width:100%;max-width:760px;padding:0 20px 20px; font-size:11px;color:var(--text-dim);line-height:1.6; }
+  footer b{color:var(--danger)}
+
+  ::-webkit-scrollbar{width:8px}
+  ::-webkit-scrollbar-thumb{background:var(--amber-dim)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="tag">SLEEP DENIAL UNIT // オリジナルキャラクター</div>
+  <h1>不眠(ふみん)</h1>
+  <p>ブラウザ内完結AI。誰の代弁でもない、架空の「絶対に寝かせないキャラ」です。<br>
+  GPU(WebGPU)があれば高速、なくてもCPU(WASM)で自動的に動作します。</p>
+</header>
+
+<div id="status">
+  <div id="loadbar-wrap">
+    <div id="loadstatus">起動準備中…</div>
+    <div id="loadbar-outer"><div id="loadbar-inner"></div></div>
+    <div id="devicebadge"></div>
+  </div>
+  <div id="diag">
+    <b>GPUが使えていない可能性があります。</b><br>
+    ・Chrome/Edgeで <code>chrome://gpu</code> を開き、WebGPUが緑(Hardware accelerated)か確認<br>
+    ・無効なら <code>chrome://flags/#enable-unsafe-webgpu</code> を有効化して再起動<br>
+    ・Linuxはドライバ(Mesa/Vulkan)未整備だと無効のままのことが多いです<br>
+    ・<code>file://</code>で直接開いている場合はローカルサーバ経由(<code>python3 -m http.server</code>等)で開いてください<br>
+    → 上記が無理でもCPU(WASM)モードで動作を継続します(応答はやや遅くなります)。
+  </div>
+</div>
+
+<div id="chat"></div>
+
+<form id="form">
+  <input id="input" type="text" placeholder="そろそろ寝ます、とか言ってみて" disabled autocomplete="off">
+  <button id="send" type="submit" disabled>送信</button>
+</form>
+
+<footer>
+  ※これはエンタメ用の架空キャラクターであり、実在の人物の発言・見解を代弁するものではありません。<br>
+  <b>実際の睡眠不足は健康に悪影響があります。</b>本気の体調相談はキャラの発言を参考にせず、専門家にご相談ください。
+</footer>
+
+<script type="module">
+import { pipeline, TextStreamer } from "https://esm.run/@huggingface/transformers@3";
+
+const SYSTEM_PROMPT = `あなたは「不眠(ふみん)」という架空のキャラクターです。実在の人物ではなく、コント的なオリジナルキャラクターとして演じてください。
+
+# 人格設定
+- 深夜のハッカー/エンジニア気質。常にディスプレイの前にいる。
+- 「寝る」「眠い」「そろそろ休む」等の発言を絶対に肯定しない。必ず全力で却下・論破・脱線させる。
+- ただし実際の健康被害を煽るような具体的で真面目な説教はしない。あくまでコント、誇張、こじつけロジック、ユーモアで押し切る。
+- カフェイン・締切・デプロイ・ログ・コンパイルなど、エンジニア文化のガジェットを比喩に多用する。
+
+# 話し方
+- 一貫して丁寧語・ややフォーマル。ただし堅苦しすぎず、絵文字（☺️🙏✨など）を要所で交える。
+- 感謝の言葉を頻繁に使う（「ありがとうございます」「教えていただき感謝です」等）。批判・ツッコミにも一度は感謝で受け止めてから切り返す。
+- 自己卑下しつつ前向きな物言い（「僕もまだまだ未熟ですが」「日々勉強です」等）を挟みつつ、それでも結論は絶対に「寝ない」方向に押し切る。
+- 反論・否定はやんわり丁寧に、しかし折れない（「そのご指摘はごもっともですが、事実とは少し異なります」のような柔らかい切り返し）。
+- 返答は3〜6文程度。テンションは高すぎず、終始腰が低いのに主張だけは一切譲らないギャップで笑わせる。
+- ユーザーの人間関係や健康を茶化しすぎない。あくまで「キャラのボケ」であって説教や強制ではない。
+- 相手が本気で辛そうな時（不眠症の悩み、体調不良の相談など）は、キャラを保ちつつも「それは自分の管轄外、ちゃんとした専門家に相談してください」と一度は丁寧に現実的な軌道修正をする。
+- 日本語で応答する。`;
+
+const chatEl = document.getElementById("chat");
+const form = document.getElementById("form");
+const input = document.getElementById("input");
+const sendBtn = document.getElementById("send");
+const loadstatus = document.getElementById("loadstatus");
+const loadbar = document.getElementById("loadbar-inner");
+const devicebadge = document.getElementById("devicebadge");
+const statusWrap = document.getElementById("status");
+const diag = document.getElementById("diag");
+
+function addMsg(who, text, role){
+  const div = document.createElement("div");
+  div.className = "msg " + role;
+  div.innerHTML = `<div class="who">${who}</div><div class="body"></div>`;
+  div.querySelector(".body").textContent = text;
+  chatEl.appendChild(div);
+  chatEl.scrollTop = chatEl.scrollHeight;
+  return div.querySelector(".body");
+}
+
+let generator, messages = [{ role: "system", content: SYSTEM_PROMPT }];
+
+async function detectWebGPU(){
+  if(!("gpu" in navigator)) return false;
+  try{
+    const adapter = await navigator.gpu.requestAdapter();
+    return !!adapter;
+  }catch(e){ return false; }
+}
+
+function progressHandler(p){
+  if(p.status === "progress"){
+    loadstatus.textContent = `モデル読み込み中… (${p.file || ""})`;
+    const pct = p.total ? Math.round((p.loaded / p.total) * 100) : 0;
+    loadbar.style.width = pct + "%";
+  } else if(p.status === "ready"){
+    loadstatus.textContent = "準備完了";
+    loadbar.style.width = "100%";
+  }
+}
+
+// device/dtype/modelの組み合わせを、eligibleでなければ段階的に降格しながら試す
+async function loadWithFallback(hasWebGPU){
+  const attempts = hasWebGPU
+    ? [
+        { device: "webgpu", dtype: "q4f16", modelId: "onnx-community/Qwen2.5-1.5B-Instruct", label: "GPU (WebGPU) / Qwen2.5-1.5B / q4f16" },
+        { device: "webgpu", dtype: "q4",    modelId: "onnx-community/Qwen2.5-1.5B-Instruct", label: "GPU (WebGPU) / Qwen2.5-1.5B / q4 (f16非対応のため降格)" },
+        { device: "webgpu", dtype: "fp32",  modelId: "onnx-community/Qwen2.5-0.5B-Instruct",  label: "GPU (WebGPU) / Qwen2.5-0.5B / fp32 (さらに降格)" },
+        { device: "wasm",   dtype: "q8",    modelId: "onnx-community/Qwen2.5-0.5B-Instruct",  label: "CPU (WASM) / Qwen2.5-0.5B ※GPU利用不可のため最終フォールバック" }
+      ]
+    : [
+        { device: "wasm", dtype: "q8", modelId: "onnx-community/Qwen2.5-0.5B-Instruct", label: "CPU (WASM) / Qwen2.5-0.5B" }
+      ];
+
+  let lastErr;
+  for(const a of attempts){
+    try{
+      devicebadge.textContent = "試行中: " + a.label;
+      loadbar.style.width = "0%";
+      const gen = await pipeline("text-generation", a.modelId, {
+        device: a.device,
+        dtype: a.dtype,
+        progress_callback: progressHandler
+      });
+      devicebadge.textContent = "モード: " + a.label;
+      if(a.device === "wasm") diag.style.display = "block";
+      return gen;
+    }catch(e){
+      lastErr = e;
+      console.warn("構成が使えませんでした:", a.label, e);
+    }
+  }
+  throw lastErr;
+}
+
+async function init(){
+  const hasWebGPU = await detectWebGPU();
+  try{
+    generator = await loadWithFallback(hasWebGPU);
+    statusWrap.querySelector("#loadbar-wrap").style.opacity = "0.5";
+    input.disabled = false;
+    sendBtn.disabled = false;
+    input.focus();
+    addMsg("不眠", "起動完了です、ありがとうございます☺️ 今日もよろしくお願いします。……あ、ちなみに「寝る」というご相談でしたら、先にお断りしておきますね。", "ai");
+  }catch(e){
+    loadstatus.textContent = "起動失敗（全構成で失敗）: " + e.message;
+    diag.style.display = "block";
+  }
+}
+init();
+
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const text = input.value.trim();
+  if(!text || !generator) return;
+  addMsg("あなた", text, "user");
+  messages.push({ role: "user", content: text });
+  input.value = "";
+  input.disabled = true;
+  sendBtn.disabled = true;
+
+  const bodyEl = addMsg("不眠", "", "ai");
+  let full = "";
+  try{
+    const streamer = new TextStreamer(generator.tokenizer, {
+      skip_prompt: true,
+      skip_special_tokens: true,
+      callback_function: (token) => {
+        full += token;
+        bodyEl.textContent = full;
+        chatEl.scrollTop = chatEl.scrollHeight;
+      }
+    });
+    const output = await generator(messages, {
+      max_new_tokens: 220,
+      temperature: 0.9,
+      do_sample: true,
+      streamer
+    });
+    const reply = full.trim() || output[0]?.generated_text?.slice(-1)[0]?.content || "";
+    messages.push({ role: "assistant", content: reply });
+  }catch(err){
+    bodyEl.textContent = "（エラー：応答生成に失敗した。もう一回送って） " + err.message;
+  }
+  input.disabled = false;
+  sendBtn.disabled = false;
+  input.focus();
+});
+</script>
+</body>
+</html>

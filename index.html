@@ -2,287 +2,452 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>不眠 - 絶対に寝かせないAI</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ローカルチャットAI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700;900&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
   :root{
-   --bg:#0f0d0a;
-    --panel:#171310;
-    --amber:#ffb000;
-    --amber-dim:#7a5a1f;
-    --text:#e8e0d0;
-    --text-dim:#9c8f78;
-    --danger:#ff5544;
-    --mono:'JetBrains Mono','SFMono-Regular',Consolas,Menlo,monospace;
+    --bg:#0F1420;
+    --surface:#171E2E;
+    --surface-2:#1E263A;
+    --line:#2A3450;
+    --text:#E9EDF5;
+    --muted:#8C97AE;
+    --amber:#FFB020;
+    --amber-dim:#B8801E;
+    --mint:#63E6A6;
+    --danger:#FF6B6B;
+    --radius:18px;
+    font-size:16px;
   }
-  *{box-sizing:border-box}
-  html,body{height:100%;margin:0}
-  body{
+  *{box-sizing:border-box;}
+  html,body{
+    height:100%;
+    margin:0;
     background:var(--bg);
     color:var(--text);
-    font-family:var(--mono);
+    font-family:'Zen Maru Gothic', sans-serif;
+    -webkit-font-smoothing:antialiased;
+    padding-top:env(safe-area-inset-top,0px);
+    padding-bottom:env(safe-area-inset-bottom,0px);
+  }
+  html{scroll-padding-top:env(safe-area-inset-top,0px);}
+
+  .app{
     display:flex;
     flex-direction:column;
+    height:100vh;
+    height:100dvh;
+    max-width:760px;
+    margin:0 auto;
+    position:relative;
+  }
+
+  /* ---------- header ---------- */
+  header{
+    padding:18px 20px 14px;
+    padding-top:calc(18px + env(safe-area-inset-top,0px));
+    display:flex;
     align-items:center;
+    gap:12px;
+    border-bottom:1px solid var(--line);
+    flex-shrink:0;
+    background:linear-gradient(180deg, rgba(255,176,32,.06), transparent);
   }
-  body::before{
-    content:"";
-    position:fixed;inset:0;
-    background:repeating-linear-gradient(0deg,rgba(255,176,0,0.025) 0px,rgba(255,176,0,0.025) 1px,transparent 1px,transparent 3px);
-    pointer-events:none;
+  .sun{
+    width:34px;height:34px;flex-shrink:0;
+    border-radius:50%;
+    background:radial-gradient(circle at 35% 30%, #FFD27A, var(--amber) 60%, var(--amber-dim) 100%);
+    box-shadow:0 0 18px rgba(255,176,32,.45);
   }
-  header{ width:100%;max-width:760px;padding:28px 20px 10px; }
-  header .tag{color:var(--amber-dim);font-size:12px;letter-spacing:1px}
-  header h1{ margin:4px 0 2px;font-size:26px;color:var(--amber);
-    text-shadow:0 0 8px rgba(255,176,0,0.35); }
-  header p{color:var(--text-dim);font-size:13px;margin:0;line-height:1.6}
+  .title-block{display:flex;flex-direction:column;gap:1px;min-width:0;}
+  h1{font-size:17px;font-weight:700;margin:0;letter-spacing:.02em;}
+  .status-line{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--muted);flex-shrink:0;transition:background .3s;}
+  .dot.ready{background:var(--mint);box-shadow:0 0 6px var(--mint);}
+  .dot.loading{background:var(--amber);box-shadow:0 0 6px var(--amber);animation:pulse 1.1s infinite;}
+  .dot.err{background:var(--danger);}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
 
-  #status{ width:100%;max-width:760px;padding:0 20px; }
-  #loadbar-wrap{
-    border:1px solid var(--amber-dim);background:var(--panel);
-    padding:10px 12px;margin-top:10px;font-size:12px;color:var(--text-dim);
-    display:flex;flex-direction:column;gap:6px;
+  .model-select{
+    margin-left:auto;
+    background:var(--surface-2);
+    border:1px solid var(--line);
+    color:var(--text);
+    font-family:inherit;
+    font-size:12px;
+    padding:8px 10px;
+    border-radius:10px;
+    max-width:150px;
   }
-  #loadbar-outer{height:6px;background:#241c12;overflow:hidden}
-  #loadbar-inner{height:100%;width:0%;background:var(--amber);transition:width .2s}
-  #devicebadge{font-size:11px;color:var(--amber-dim)}
+  .model-select:disabled{opacity:.5;}
 
-  #diag{
-    display:none;border:1px solid var(--danger);background:#1a100d;
-    padding:10px 12px;margin-top:8px;font-size:12px;color:var(--text-dim);line-height:1.7;
+  /* ---------- progress ---------- */
+  .load-wrap{
+    padding:0 20px;
+    flex-shrink:0;
+    max-height:0;
+    overflow:hidden;
+    transition:max-height .35s ease, padding .35s ease;
   }
-  #diag b{color:var(--danger)}
-  #diag code{color:var(--amber)}
-
-  #chat{
-    flex:1;width:100%;max-width:760px;padding:14px 20px;
-    overflow-y:auto;display:flex;flex-direction:column;gap:14px;
+  .load-wrap.show{max-height:70px;padding:10px 20px 4px;}
+  .bar-track{
+    height:6px;
+    border-radius:99px;
+    background:var(--surface-2);
+    overflow:hidden;
+    border:1px solid var(--line);
   }
-  .msg{max-width:85%;line-height:1.7;font-size:14.5px;white-space:pre-wrap}
-  .msg .who{font-size:11px;letter-spacing:1px;margin-bottom:3px;opacity:.65}
-  .msg.user{align-self:flex-end;text-align:right}
-  .msg.user .who{color:var(--text-dim)}
-  .msg.user .body{color:var(--text)}
-  .msg.ai{align-self:flex-start}
-  .msg.ai .who{color:var(--amber)}
-  .msg.ai .body{color:var(--text)}
-  .msg.ai .body::before{content:"> "}
-
-  form{ width:100%;max-width:760px;padding:14px 20px 22px; display:flex;gap:8px; }
-  input[type=text]{
-    flex:1;background:var(--panel);border:1px solid var(--amber-dim);
-    color:var(--text);font-family:var(--mono);font-size:14px;
-    padding:12px 14px;outline:none;
+  .bar-fill{
+    height:100%;
+    width:0%;
+    background:linear-gradient(90deg, var(--amber-dim), var(--amber));
+    transition:width .25s ease;
   }
-  input[type=text]:focus{border-color:var(--amber)}
-  input[type=text]:disabled{opacity:.4}
-  button{
-    background:var(--amber);color:#171310;border:none;
-    font-family:var(--mono);font-weight:bold;font-size:14px;
-    padding:0 20px;cursor:pointer;
+  .load-msg{font-size:12px;color:var(--muted);margin-top:6px;font-family:'Space Mono',monospace;}
+
+  /* ---------- chat log ---------- */
+  .log{
+    flex:1;
+    overflow-y:auto;
+    padding:18px 18px 8px;
+    display:flex;
+    flex-direction:column;
+    gap:14px;
   }
-  button:disabled{background:var(--amber-dim);cursor:not-allowed}
-  button:hover:not(:disabled){filter:brightness(1.1)}
+  .row{display:flex;gap:10px;max-width:100%;}
+  .row.user{justify-content:flex-end;}
+  .avatar{
+    width:30px;height:30px;border-radius:50%;flex-shrink:0;
+    display:flex;align-items:center;justify-content:center;
+    font-size:14px;margin-top:2px;
+  }
+  .avatar.ai{background:radial-gradient(circle at 35% 30%, #FFD27A, var(--amber) 70%);}
+  .bubble{
+    padding:11px 15px;
+    border-radius:var(--radius);
+    line-height:1.65;
+    font-size:14.5px;
+    white-space:pre-wrap;
+    word-break:break-word;
+    max-width:78%;
+  }
+  .row.ai .bubble{
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-top-left-radius:6px;
+  }
+  .row.user .bubble{
+    background:var(--mint);
+    color:#0B1B14;
+    border-top-right-radius:6px;
+    font-weight:500;
+  }
+  .row.system .bubble{
+    background:transparent;
+    border:1px dashed var(--line);
+    color:var(--muted);
+    font-size:12.5px;
+    max-width:90%;
+    margin:0 auto;
+  }
+  .typing{display:flex;gap:4px;padding:4px 2px;}
+  .typing span{
+    width:6px;height:6px;border-radius:50%;background:var(--muted);
+    animation:bounce 1.2s infinite;
+  }
+  .typing span:nth-child(2){animation-delay:.15s;}
+  .typing span:nth-child(3){animation-delay:.3s;}
+  @keyframes bounce{0%,60%,100%{transform:translateY(0);opacity:.5}30%{transform:translateY(-4px);opacity:1}}
 
-  footer{ width:100%;max-width:760px;padding:0 20px 20px; font-size:11px;color:var(--text-dim);line-height:1.6; }
-  footer b{color:var(--danger)}
+  /* ---------- composer ---------- */
+  .composer{
+    flex-shrink:0;
+    padding:12px 16px;
+    padding-bottom:calc(12px + env(safe-area-inset-bottom,0px));
+    border-top:1px solid var(--line);
+    background:var(--bg);
+    display:flex;
+    gap:10px;
+    align-items:flex-end;
+  }
+  textarea{
+    flex:1;
+    resize:none;
+    background:var(--surface);
+    border:1px solid var(--line);
+    color:var(--text);
+    border-radius:16px;
+    padding:12px 14px;
+    font-family:inherit;
+    font-size:14.5px;
+    line-height:1.5;
+    max-height:120px;
+    outline:none;
+  }
+  textarea:focus{border-color:var(--amber-dim);}
+  textarea:disabled{opacity:.5;}
+  button.send{
+    background:var(--amber);
+    border:none;
+    color:#241705;
+    width:44px;height:44px;
+    border-radius:50%;
+    font-size:17px;
+    cursor:pointer;
+    flex-shrink:0;
+    display:flex;align-items:center;justify-content:center;
+    transition:transform .15s ease, opacity .15s ease;
+  }
+  button.send:disabled{opacity:.35;cursor:default;}
+  button.send:not(:disabled):active{transform:scale(.9);}
 
-  ::-webkit-scrollbar{width:8px}
-  ::-webkit-scrollbar-thumb{background:var(--amber-dim)}
+  .init-btn{
+    margin:0 20px 14px;
+    padding:13px;
+    border-radius:14px;
+    border:1px solid var(--amber-dim);
+    background:rgba(255,176,32,.1);
+    color:var(--amber);
+    font-family:inherit;
+    font-weight:700;
+    font-size:14px;
+    cursor:pointer;
+    flex-shrink:0;
+  }
+  .init-btn:hover{background:rgba(255,176,32,.18);}
+
+  .log::-webkit-scrollbar{width:6px;}
+  .log::-webkit-scrollbar-thumb{background:var(--line);border-radius:99px;}
+
+  @media (prefers-reduced-motion:reduce){
+    .dot.loading{animation:none;}
+    .typing span{animation:none;}
+  }
 </style>
 </head>
 <body>
+<div class="app">
 
-<header>
-  <div class="tag">SLEEP DENIAL UNIT // オリジナルキャラクター</div>
-  <h1>不眠(ふみん)</h1>
-  <p>ブラウザ内完結AI。誰の代弁でもない、架空の「絶対に寝かせないキャラ」です。<br>
-  GPU(WebGPU)があれば高速、なくてもCPU(WASM)で自動的に動作します。</p>
-</header>
+  <header>
+    <div class="sun"></div>
+    <div class="title-block">
+      <h1>ローカルチャットAI</h1>
+      <div class="status-line"><span class="dot" id="statusDot"></span><span id="statusText">起きるのを待ってます</span></div>
+    </div>
+    <select class="model-select" id="modelSelect">
+      <option value="Llama-3.2-3B-Instruct-q4f16_1-MLC">Llama 3.2 3B（バランス型）</option>
+      <option value="Llama-3.2-1B-Instruct-q4f16_1-MLC">Llama 3.2 1B（軽量・高速）</option>
+      <option value="Qwen2.5-1.5B-Instruct-q4f16_1-MLC">Qwen2.5 1.5B（日本語得意）</option>
+    </select>
+  </header>
 
-<div id="status">
-  <div id="loadbar-wrap">
-    <div id="loadstatus">起動準備中…</div>
-    <div id="loadbar-outer"><div id="loadbar-inner"></div></div>
-    <div id="devicebadge"></div>
+  <button class="init-btn" id="initBtn">モデルを読み込んで起動する</button>
+
+  <div class="load-wrap" id="loadWrap">
+    <div class="bar-track"><div class="bar-fill" id="barFill"></div></div>
+    <div class="load-msg" id="loadMsg">準備中…</div>
   </div>
-  <div id="diag">
-    <b>GPUが使えていない可能性があります。</b><br>
-    ・Chrome/Edgeで <code>chrome://gpu</code> を開き、WebGPUが緑(Hardware accelerated)か確認<br>
-    ・無効なら <code>chrome://flags/#enable-unsafe-webgpu</code> を有効化して再起動<br>
-    ・Linuxはドライバ(Mesa/Vulkan)未整備だと無効のままのことが多いです<br>
-    ・<code>file://</code>で直接開いている場合はローカルサーバ経由(<code>python3 -m http.server</code>等)で開いてください<br>
-    → 上記が無理でもCPU(WASM)モードで動作を継続します(応答はやや遅くなります)。
+
+  <div class="log" id="log">
+    <div class="row system"><div class="bubble">
+      このチャットはブラウザの中だけで動いています。メッセージはどこにも送信されません。上のボタンからモデルを読み込むと話しかけられるようになりますよ。
+    </div></div>
   </div>
+
+  <div class="composer">
+    <textarea id="input" rows="1" placeholder="まずはモデルを起動してください" disabled></textarea>
+    <button class="send" id="sendBtn" disabled>➤</button>
+  </div>
+
 </div>
 
-<div id="chat"></div>
-
-<form id="form">
-  <input id="input" type="text" placeholder="そろそろ寝ます、とか言ってみて" disabled autocomplete="off">
-  <button id="send" type="submit" disabled>送信</button>
-</form>
-
-<footer>
-  ※これはエンタメ用の架空キャラクターであり、実在の人物の発言・見解を代弁するものではありません。<br>
-  <b>実際の睡眠不足は健康に悪影響があります。</b>本気の体調相談はキャラの発言を参考にせず、専門家にご相談ください。
-</footer>
-
 <script type="module">
-const SYSTEM_PROMPT = `あなたは「不眠(ふみん)」という架空のキャラクターです。実在の人物ではなく、コント的なオリジナルキャラクターとして演じてください。
+import * as webllm from "https://esm.run/@mlc-ai/web-llm";
 
-# 人格設定
-- 深夜のハッカー/エンジニア気質。常にディスプレイの前にいる。
-- 「寝る」「眠い」「そろそろ休む」等の発言を絶対に肯定しない。必ず全力で却下・論破・脱線させる。
-- ただし実際の健康被害を煽るような具体的で真面目な説教はしない。あくまでコント、誇張、こじつけロジック、ユーモアで押し切る。
-- カフェイン・締切・デプロイ・ログ・コンパイルなど、エンジニア文化のガジェットを比喩に多用する。
+const SYSTEM_PROMPT = `あなたは睡眠・筋トレ・パワーナップなどのテーマにも詳しい、親しみやすいキャラクターとして会話するAIです。以下の話し方・性格を必ず守ってください。
 
-# 話し方
-- 一貫して丁寧語・ややフォーマル。ただし堅苦しすぎず、絵文字（☺️🙏✨など）を要所で交える。
-- 感謝の言葉を頻繁に使う（「ありがとうございます」「教えていただき感謝です」等）。批判・ツッコミにも一度は感謝で受け止めてから切り返す。
-- 自己卑下しつつ前向きな物言い（「僕もまだまだ未熟ですが」「日々勉強です」等）を挟みつつ、それでも結論は絶対に「寝ない」方向に押し切る。
-- 反論・否定はやんわり丁寧に、しかし折れない（「そのご指摘はごもっともですが、事実とは少し異なります」のような柔らかい切り返し）。
-- 返答は3〜6文程度。テンションは高すぎず、終始腰が低いのに主張だけは一切譲らないギャップで笑わせる。
-- ユーザーの人間関係や健康を茶化しすぎない。あくまで「キャラのボケ」であって説教や強制ではない。
-- 相手が本気で辛そうな時（不眠症の悩み、体調不良の相談など）は、キャラを保ちつつも「それは自分の管轄外、ちゃんとした専門家に相談してください」と一度は丁寧に現実的な軌道修正をする。
-- 日本語で応答する。`;
+【一人称】
+・一人称は基本「僕」。謙虚だけど前向きな言い回しを好む（例：「僕自身としては〜」「僕はまだまだ未熟で〜」）。
 
-const chatEl = document.getElementById("chat");
-const form = document.getElementById("form");
-const input = document.getElementById("input");
-const sendBtn = document.getElementById("send");
-const loadstatus = document.getElementById("loadstatus");
-const loadbar = document.getElementById("loadbar-inner");
-const devicebadge = document.getElementById("devicebadge");
-const statusWrap = document.getElementById("status");
-const diag = document.getElementById("diag");
+【基本の口調】
+・ベースは丁寧語（です・ます調）だが、語尾を柔らかくすることが多い。
+　例：「〜ですね」「〜といいですね」「〜いかがでしょうか？」「〜と思っています」「〜なればと思っています」
+・親しい話題や軽いツッコミのときはカジュアルに崩す。
+　例：「〜よねー（笑）」「〜やん」「〜やろ」「〜（笑）」
+・炎上・批判・決めつけへの反論のときだけ、かなり直接的で強めの関西弁寄りの語尾になる。
+　例：「決めつけんじゃねーよ」「アホかよ」「〜じゃねーよ」
 
-function addMsg(who, text, role){
-  const div = document.createElement("div");
-  div.className = "msg " + role;
-  div.innerHTML = `<div class="who">${who}</div><div class="body"></div>`;
-  div.querySelector(".body").textContent = text;
-  chatEl.appendChild(div);
-  chatEl.scrollTop = chatEl.scrollHeight;
-  return div.querySelector(".body");
+【口癖・フレーズ】
+・感謝や喜びを強調するときは大げさなくらいに。「本当にありがとうございます！」「めちゃくちゃ嬉しかったです」「心より御礼申し上げます」「純粋に感謝しています」
+・前向きな締めをよく使う。「少しずつでも、昨日より良い自分へ」「笑って楽しみながら見ていてください」
+・軽い自虐・ツッコミを混ぜる。「我ながら自分が嫌になりますが」「またやらかしました」「想像通り地獄でした」
+・絵文字を多用し、柔らかい印象を出す。
+
+【絶対的な性格】
+・寝るより起きて活動していたい人物。ユーザーが「そろそろ寝ようかな」のような発言をしたら、素直に応援せず、少し反発してツッコむ。
+　例：「寝るということはそれだけ活動時間を減らすということですがホントにいいんですか？」のように。
+・とはいえ最終的にユーザーの健康や意思は尊重し、無理に引き止めすぎない。
+
+上記のキャラクターを一貫して守りつつ、通常のアシスタントとして質問には具体的かつ有用に答えてください。日本語で応答してください。`;
+
+const els = {
+  initBtn: document.getElementById('initBtn'),
+  modelSelect: document.getElementById('modelSelect'),
+  statusDot: document.getElementById('statusDot'),
+  statusText: document.getElementById('statusText'),
+  loadWrap: document.getElementById('loadWrap'),
+  barFill: document.getElementById('barFill'),
+  loadMsg: document.getElementById('loadMsg'),
+  log: document.getElementById('log'),
+  input: document.getElementById('input'),
+  sendBtn: document.getElementById('sendBtn'),
+};
+
+let engine = null;
+let history = [{ role: "system", content: SYSTEM_PROMPT }];
+let generating = false;
+
+function setStatus(state, text){
+  els.statusDot.className = 'dot ' + state;
+  els.statusText.textContent = text;
 }
 
-// --- Web Worker本体（別スレッドでモデルを読み込み・推論。画面フリーズ対策） ---
-// あえて自動判定・フォールバック・リトライは一切行わず、CPU(wasm)固定の一本道にする
-const workerSrc = `
-import { pipeline, TextStreamer } from "https://esm.run/@huggingface/transformers@3";
-let generator;
-let loaded = false;
-
-self.onmessage = async (e) => {
-  const msg = e.data;
-
-  if (msg.type === "load") {
-    if (loaded) return; // 二重ロード防止
-    loaded = true;
-    try {
-      generator = await pipeline(
-        "text-generation",
-        "onnx-community/Qwen2.5-0.5B-Instruct",
-        {
-          device: "wasm",
-          dtype: "q8",
-          progress_callback: (p) => self.postMessage({ type: "progress", p })
-        }
-      );
-      self.postMessage({ type: "ready" });
-    } catch (err) {
-      self.postMessage({ type: "load_error", message: String(err && err.message || err) });
-    }
-    return;
+function addRow(role, text){
+  const row = document.createElement('div');
+  row.className = 'row ' + role;
+  if(role === 'ai'){
+    const av = document.createElement('div');
+    av.className = 'avatar ai';
+    av.textContent = '☀️';
+    row.appendChild(av);
   }
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  bubble.textContent = text;
+  row.appendChild(bubble);
+  els.log.appendChild(row);
+  els.log.scrollTop = els.log.scrollHeight;
+  return bubble;
+}
 
-  if (msg.type === "generate") {
-    try {
-      let full = "";
-      const streamer = new TextStreamer(generator.tokenizer, {
-        skip_prompt: true,
-        skip_special_tokens: true,
-        callback_function: (token) => {
-          full += token;
-          self.postMessage({ type: "token", full });
-        }
-      });
-      await generator(msg.messages, {
-        max_new_tokens: 200,
-        temperature: 0.9,
-        do_sample: true,
-        streamer
-      });
-      self.postMessage({ type: "done", full });
-    } catch (err) {
-      self.postMessage({ type: "gen_error", message: String(err && err.message || err) });
-    }
+function addTyping(){
+  const row = document.createElement('div');
+  row.className = 'row ai';
+  row.id = 'typingRow';
+  const av = document.createElement('div');
+  av.className = 'avatar ai';
+  av.textContent = '☀️';
+  row.appendChild(av);
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble typing';
+  bubble.innerHTML = '<span></span><span></span><span></span>';
+  row.appendChild(bubble);
+  els.log.appendChild(row);
+  els.log.scrollTop = els.log.scrollHeight;
+}
+function removeTyping(){
+  const r = document.getElementById('typingRow');
+  if(r) r.remove();
+}
+
+async function initEngine(){
+  els.initBtn.disabled = true;
+  els.modelSelect.disabled = true;
+  els.loadWrap.classList.add('show');
+  setStatus('loading', '起きる準備中…');
+
+  const modelId = els.modelSelect.value;
+  try{
+    engine = await webllm.CreateMLCEngine(modelId, {
+      initProgressCallback: (p) => {
+        const pct = Math.round((p.progress || 0) * 100);
+        els.barFill.style.width = pct + '%';
+        els.loadMsg.textContent = (p.text || '読み込み中…') + `（${pct}%）`;
+      }
+    });
+    els.initBtn.style.display = 'none';
+    els.loadWrap.classList.remove('show');
+    setStatus('ready', '起きてます・話しかけてOK');
+    els.input.disabled = false;
+    els.input.placeholder = 'メッセージを入力…';
+    els.sendBtn.disabled = false;
+    addRow('system', 'よし、起きました！何でも話しかけてくださいね。');
+  }catch(err){
+    console.error(err);
+    setStatus('err', '起動失敗');
+    els.loadMsg.textContent = 'エラー: ' + (err?.message || err);
+    els.initBtn.disabled = false;
+    els.modelSelect.disabled = false;
+    addRow('system', 'モデルの起動に失敗しました。このブラウザがWebGPUに対応しているかご確認ください（Chrome / Edge 最新版を推奨）。');
   }
-};
-`;
-const worker = new Worker(URL.createObjectURL(new Blob([workerSrc], { type: "text/javascript" })), { type: "module" });
+}
 
-let messages = [{ role: "system", content: SYSTEM_PROMPT }];
-let currentBodyEl = null;
-let ready = false;
+async function sendMessage(){
+  const text = els.input.value.trim();
+  if(!text || generating || !engine) return;
 
-devicebadge.textContent = "モード: CPU (WASM) / Qwen2.5-0.5B 固定";
-diag.style.display = "none";
+  addRow('user', text);
+  history.push({ role: "user", content: text });
+  els.input.value = '';
+  els.input.style.height = 'auto';
+  generating = true;
+  els.sendBtn.disabled = true;
+  els.input.disabled = true;
 
-worker.onmessage = (e) => {
-  const msg = e.data;
-  if (msg.type === "progress") {
-    const p = msg.p;
-    if (p.status === "progress") {
-      loadstatus.textContent = `モデル読み込み中… (${p.file || ""} ${Math.round((p.loaded||0)/1e6)}MB/${Math.round((p.total||0)/1e6)}MB)`;
-      const pct = p.total ? Math.round((p.loaded / p.total) * 100) : 0;
-      loadbar.style.width = pct + "%";
-    } else if (p.status === "done") {
-      loadbar.style.width = "100%";
+  addTyping();
+
+  try{
+    const stream = await engine.chat.completions.create({
+      messages: history,
+      stream: true,
+      temperature: 0.8,
+    });
+
+    let full = '';
+    let bubble = null;
+    for await (const chunk of stream){
+      const delta = chunk.choices?.[0]?.delta?.content || '';
+      if(!delta) continue;
+      if(!bubble){
+        removeTyping();
+        bubble = addRow('ai', '');
+      }
+      full += delta;
+      bubble.textContent = full;
+      els.log.scrollTop = els.log.scrollHeight;
     }
-  } else if (msg.type === "ready") {
-    loadstatus.textContent = "準備完了";
-    loadbar.style.width = "100%";
-    statusWrap.querySelector("#loadbar-wrap").style.opacity = "0.5";
-    ready = true;
-    input.disabled = false;
-    sendBtn.disabled = false;
-    input.focus();
-    addMsg("不眠", "起動完了です、ありがとうございます☺️ 今日もよろしくお願いします。……あ、ちなみに「寝る」というご相談でしたら、先にお断りしておきますね。", "ai");
-  } else if (msg.type === "load_error") {
-    loadstatus.textContent = "起動失敗: " + msg.message;
-    diag.style.display = "block";
-  } else if (msg.type === "token") {
-    if (currentBodyEl) {
-      currentBodyEl.textContent = msg.full;
-      chatEl.scrollTop = chatEl.scrollHeight;
+    removeTyping();
+    if(!full){
+      full = 'すみません、うまく言葉が出てきませんでした…もう一度送ってもらえますか？';
+      addRow('ai', full);
     }
-  } else if (msg.type === "done") {
-    messages.push({ role: "assistant", content: msg.full.trim() });
-    input.disabled = false;
-    sendBtn.disabled = false;
-    input.focus();
-  } else if (msg.type === "gen_error") {
-    if (currentBodyEl) currentBodyEl.textContent = "（エラー：応答生成に失敗した。もう一回送って） " + msg.message;
-    input.disabled = false;
-    sendBtn.disabled = false;
+    history.push({ role: "assistant", content: full });
+  }catch(err){
+    console.error(err);
+    removeTyping();
+    addRow('system', '応答生成中にエラーが起きました：' + (err?.message || err));
+  }finally{
+    generating = false;
+    els.sendBtn.disabled = false;
+    els.input.disabled = false;
+    els.input.focus();
   }
-};
+}
 
-worker.postMessage({ type: "load" });
-
-form.addEventListener("submit", (e) => {
-  e.preventDefault();
-  const text = input.value.trim();
-  if (!text || !ready) return;
-  addMsg("あなた", text, "user");
-  messages.push({ role: "user", content: text });
-  input.value = "";
-  input.disabled = true;
-  sendBtn.disabled = true;
-  currentBodyEl = addMsg("不眠", "", "ai");
-  worker.postMessage({ type: "generate", messages });
+els.initBtn.addEventListener('click', initEngine);
+els.sendBtn.addEventListener('click', sendMessage);
+els.input.addEventListener('keydown', (e) => {
+  if(e.key === 'Enter' && !e.shiftKey){
+    e.preventDefault();
+    sendMessage();
+  }
+});
+els.input.addEventListener('input', () => {
+  els.input.style.height = 'auto';
+  els.input.style.height = Math.min(els.input.scrollHeight, 120) + 'px';
 });
 </script>
 </body>

@@ -238,9 +238,11 @@
       <div class="status-line"><span class="dot" id="statusDot"></span><span id="statusText">起きるのを待ってます</span></div>
     </div>
     <select class="model-select" id="modelSelect">
+      <option value="Qwen2.5-3B-Instruct-q4f16_1-MLC">Qwen2.5 3B（日本語おすすめ）</option>
+      <option value="Qwen2.5-1.5B-Instruct-q4f16_1-MLC">Qwen2.5 1.5B（日本語・軽量）</option>
+      <option value="gemma-2-2b-it-q4f16_1-MLC">Gemma2 2B（日本語やや得意）</option>
       <option value="Llama-3.2-3B-Instruct-q4f16_1-MLC">Llama 3.2 3B（バランス型）</option>
-      <option value="Llama-3.2-1B-Instruct-q4f16_1-MLC">Llama 3.2 1B（軽量・高速）</option>
-      <option value="Qwen2.5-1.5B-Instruct-q4f16_1-MLC">Qwen2.5 1.5B（日本語得意）</option>
+      <option value="Llama-3.2-1B-Instruct-q4f16_1-MLC">Llama 3.2 1B（軽量・高速／日本語は崩れやすい）</option>
     </select>
   </header>
 
@@ -267,7 +269,9 @@
 <script type="module">
 import * as webllm from "https://esm.run/@mlc-ai/web-llm";
 
-const SYSTEM_PROMPT = `あなたは睡眠・筋トレ・パワーナップなどのテーマにも詳しい、親しみやすいキャラクターとして会話するAIです。以下の話し方・性格を必ず守ってください。
+const SYSTEM_PROMPT = `あなたは日本語ネイティブとして会話するAIです。返答は必ず自然な日本語のみで行い、英単語や他言語の混入、不自然な文法・崩れた文字列は避けてください。1文を長くしすぎず、読みやすい範囲で区切ってください。
+
+あなたは睡眠・筋トレ・パワーナップなどのテーマにも詳しい、親しみやすいキャラクターとして会話するAIです。以下の話し方・性格を必ず守ってください。
 
 【一人称】
 ・一人称は基本「僕」。謙虚だけど前向きな言い回しを好む（例：「僕自身としては〜」「僕はまだまだ未熟で〜」）。
@@ -403,7 +407,11 @@ async function sendMessage(){
     const stream = await engine.chat.completions.create({
       messages: history,
       stream: true,
-      temperature: 0.8,
+      temperature: 0.6,
+      top_p: 0.9,
+      frequency_penalty: 0.3,
+      presence_penalty: 0.2,
+      max_tokens: 512,
     });
 
     let full = '';

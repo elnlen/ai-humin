@@ -129,8 +129,6 @@
 </footer>
 
 <script type="module">
-import { pipeline, TextStreamer } from "https://esm.run/@huggingface/transformers@3";
-
 const SYSTEM_PROMPT = `あなたは「不眠(ふみん)」という架空のキャラクターです。実在の人物ではなく、コント的なオリジナルキャラクターとして演じてください。
 
 # 人格設定
@@ -169,113 +167,134 @@ function addMsg(who, text, role){
   return div.querySelector(".body");
 }
 
-let generator, messages = [{ role: "system", content: SYSTEM_PROMPT }];
+// --- Web Worker本体（別スレッドでモデルを読み込み・推論。画面フリーズ対策） ---
+const workerSrc = `
+import { pipeline, TextStreamer } from "https://esm.run/@huggingface/transformers@3";
+let generator;
+
+self.onmessage = async (e) => {
+  const msg = e.data;
+  if (msg.type === "load") {
+    const MODEL = "onnx-community/Qwen2.5-0.5B-Instruct"; // 軽量モデルに統一
+    const attempts = msg.hasWebGPU
+      ? [
+          { device: "webgpu", dtype: "q4", label: "GPU (WebGPU) / Qwen2.5-0.5B / q4" },
+          { device: "wasm",   dtype: "q8", label: "CPU (WASM) / Qwen2.5-0.5B ※GPU利用不可のため降格" }
+        ]
+      : [
+          { device: "wasm", dtype: "q8", label: "CPU (WASM) / Qwen2.5-0.5B" }
+        ];
+    let lastErr;
+    for (const a of attempts) {
+      try {
+        self.postMessage({ type: "trying", label: a.label });
+        generator = await pipeline("text-generation", MODEL, {
+          device: a.device,
+          dtype: a.dtype,
+          progress_callback: (p) => self.postMessage({ type: "progress", p })
+        });
+        self.postMessage({ type: "ready", label: a.label, wasm: a.device === "wasm" });
+        return;
+      } catch (err) {
+        lastErr = err;
+        self.postMessage({ type: "attempt_failed", label: a.label, message: String(err && err.message || err) });
+      }
+    }
+    self.postMessage({ type: "load_error", message: String(lastErr && lastErr.message || lastErr) });
+  }
+  if (msg.type === "generate") {
+    try {
+      let full = "";
+      const streamer = new TextStreamer(generator.tokenizer, {
+        skip_prompt: true,
+        skip_special_tokens: true,
+        callback_function: (token) => {
+          full += token;
+          self.postMessage({ type: "token", full });
+        }
+      });
+      await generator(msg.messages, {
+        max_new_tokens: 200,
+        temperature: 0.9,
+        do_sample: true,
+        streamer
+      });
+      self.postMessage({ type: "done", full });
+    } catch (err) {
+      self.postMessage({ type: "gen_error", message: String(err && err.message || err) });
+    }
+  }
+};
+`;
+const worker = new Worker(URL.createObjectURL(new Blob([workerSrc], { type: "text/javascript" })), { type: "module" });
+
+let messages = [{ role: "system", content: SYSTEM_PROMPT }];
+let currentBodyEl = null;
+let ready = false;
 
 async function detectWebGPU(){
   if(!("gpu" in navigator)) return false;
-  try{
-    const adapter = await navigator.gpu.requestAdapter();
-    return !!adapter;
-  }catch(e){ return false; }
+  try{ return !!(await navigator.gpu.requestAdapter()); }catch(e){ return false; }
 }
 
-function progressHandler(p){
-  if(p.status === "progress"){
-    loadstatus.textContent = `モデル読み込み中… (${p.file || ""})`;
-    const pct = p.total ? Math.round((p.loaded / p.total) * 100) : 0;
-    loadbar.style.width = pct + "%";
-  } else if(p.status === "ready"){
+worker.onmessage = (e) => {
+  const msg = e.data;
+  if (msg.type === "trying") {
+    devicebadge.textContent = "試行中: " + msg.label;
+    loadbar.style.width = "0%";
+  } else if (msg.type === "progress") {
+    const p = msg.p;
+    if (p.status === "progress") {
+      loadstatus.textContent = `モデル読み込み中… (${p.file || ""})`;
+      const pct = p.total ? Math.round((p.loaded / p.total) * 100) : 0;
+      loadbar.style.width = pct + "%";
+    }
+  } else if (msg.type === "attempt_failed") {
+    console.warn("構成が使えませんでした:", msg.label, msg.message);
+  } else if (msg.type === "ready") {
+    devicebadge.textContent = "モード: " + msg.label;
+    if (msg.wasm) diag.style.display = "block";
     loadstatus.textContent = "準備完了";
     loadbar.style.width = "100%";
-  }
-}
-
-// device/dtype/modelの組み合わせを、eligibleでなければ段階的に降格しながら試す
-async function loadWithFallback(hasWebGPU){
-  const attempts = hasWebGPU
-    ? [
-        { device: "webgpu", dtype: "q4f16", modelId: "onnx-community/Qwen2.5-1.5B-Instruct", label: "GPU (WebGPU) / Qwen2.5-1.5B / q4f16" },
-        { device: "webgpu", dtype: "q4",    modelId: "onnx-community/Qwen2.5-1.5B-Instruct", label: "GPU (WebGPU) / Qwen2.5-1.5B / q4 (f16非対応のため降格)" },
-        { device: "webgpu", dtype: "fp32",  modelId: "onnx-community/Qwen2.5-0.5B-Instruct",  label: "GPU (WebGPU) / Qwen2.5-0.5B / fp32 (さらに降格)" },
-        { device: "wasm",   dtype: "q8",    modelId: "onnx-community/Qwen2.5-0.5B-Instruct",  label: "CPU (WASM) / Qwen2.5-0.5B ※GPU利用不可のため最終フォールバック" }
-      ]
-    : [
-        { device: "wasm", dtype: "q8", modelId: "onnx-community/Qwen2.5-0.5B-Instruct", label: "CPU (WASM) / Qwen2.5-0.5B" }
-      ];
-
-  let lastErr;
-  for(const a of attempts){
-    try{
-      devicebadge.textContent = "試行中: " + a.label;
-      loadbar.style.width = "0%";
-      const gen = await pipeline("text-generation", a.modelId, {
-        device: a.device,
-        dtype: a.dtype,
-        progress_callback: progressHandler
-      });
-      devicebadge.textContent = "モード: " + a.label;
-      if(a.device === "wasm") diag.style.display = "block";
-      return gen;
-    }catch(e){
-      lastErr = e;
-      console.warn("構成が使えませんでした:", a.label, e);
-    }
-  }
-  throw lastErr;
-}
-
-async function init(){
-  const hasWebGPU = await detectWebGPU();
-  try{
-    generator = await loadWithFallback(hasWebGPU);
     statusWrap.querySelector("#loadbar-wrap").style.opacity = "0.5";
+    ready = true;
     input.disabled = false;
     sendBtn.disabled = false;
     input.focus();
     addMsg("不眠", "起動完了です、ありがとうございます☺️ 今日もよろしくお願いします。……あ、ちなみに「寝る」というご相談でしたら、先にお断りしておきますね。", "ai");
-  }catch(e){
-    loadstatus.textContent = "起動失敗（全構成で失敗）: " + e.message;
+  } else if (msg.type === "load_error") {
+    loadstatus.textContent = "起動失敗（全構成で失敗）: " + msg.message;
     diag.style.display = "block";
+  } else if (msg.type === "token") {
+    if (currentBodyEl) {
+      currentBodyEl.textContent = msg.full;
+      chatEl.scrollTop = chatEl.scrollHeight;
+    }
+  } else if (msg.type === "done") {
+    messages.push({ role: "assistant", content: msg.full.trim() });
+    input.disabled = false;
+    sendBtn.disabled = false;
+    input.focus();
+  } else if (msg.type === "gen_error") {
+    if (currentBodyEl) currentBodyEl.textContent = "（エラー：応答生成に失敗した。もう一回送って） " + msg.message;
+    input.disabled = false;
+    sendBtn.disabled = false;
   }
-}
-init();
+};
 
-form.addEventListener("submit", async (e) => {
+detectWebGPU().then((hasWebGPU) => worker.postMessage({ type: "load", hasWebGPU }));
+
+form.addEventListener("submit", (e) => {
   e.preventDefault();
   const text = input.value.trim();
-  if(!text || !generator) return;
+  if (!text || !ready) return;
   addMsg("あなた", text, "user");
   messages.push({ role: "user", content: text });
   input.value = "";
   input.disabled = true;
   sendBtn.disabled = true;
-
-  const bodyEl = addMsg("不眠", "", "ai");
-  let full = "";
-  try{
-    const streamer = new TextStreamer(generator.tokenizer, {
-      skip_prompt: true,
-      skip_special_tokens: true,
-      callback_function: (token) => {
-        full += token;
-        bodyEl.textContent = full;
-        chatEl.scrollTop = chatEl.scrollHeight;
-      }
-    });
-    const output = await generator(messages, {
-      max_new_tokens: 220,
-      temperature: 0.9,
-      do_sample: true,
-      streamer
-    });
-    const reply = full.trim() || output[0]?.generated_text?.slice(-1)[0]?.content || "";
-    messages.push({ role: "assistant", content: reply });
-  }catch(err){
-    bodyEl.textContent = "（エラー：応答生成に失敗した。もう一回送って） " + err.message;
-  }
-  input.disabled = false;
-  sendBtn.disabled = false;
-  input.focus();
+  currentBodyEl = addMsg("不眠", "", "ai");
+  worker.postMessage({ type: "generate", messages });
 });
 </script>
 </body>

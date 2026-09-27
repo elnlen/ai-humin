@@ -237,7 +237,11 @@
       <h1>ローカルチャットAI</h1>
       <div class="status-line"><span class="dot" id="statusDot"></span><span id="statusText">起きるのを待ってます</span></div>
     </div>
-    <select class="model-select" id="modelSelect" style="display:none;"></select>
+    <select class="model-select" id="modelSelect">
+      <option value="Qwen2.5-7B-Instruct-q4f16_1-MLC">Qwen2.5 7B（日本語最重視・大きめ）</option>
+      <option value="Qwen2.5-3B-Instruct-q4f16_1-MLC" selected>Qwen2.5 3B（バランス）</option>
+      <option value="Qwen2.5-1.5B-Instruct-q4f16_1-MLC">Qwen2.5 1.5B（軽量）</option>
+    </select>
   </header>
 
   <button class="init-btn" id="initBtn">モデルを読み込んで起動する</button>
@@ -249,7 +253,7 @@
 
   <div class="log" id="log">
     <div class="row system"><div class="bubble">
-      このチャットはブラウザの中だけで動いています。メッセージはどこにも送信されません。モデルは <strong>LFM2.5-1.2B-JP</strong>（Transformers.js + WebGPU）です。上のボタンから読み込むと話しかけられるようになりますよ。
+      このチャットはブラウザの中だけで動いています。メッセージはどこにも送信されません。上のプルダウンでモデルサイズを選び、ボタンから読み込むと話しかけられるようになりますよ。7Bが一番日本語が安定しますが、ダウンロードが大きめ（約4.5GB）でVRAMも多めに必要です。
     </div></div>
   </div>
 
@@ -261,9 +265,7 @@
 </div>
 
 <script type="module">
-import { AutoModelForCausalLM, AutoTokenizer, TextStreamer } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3";
-
-const MODEL_ID = "LiquidAI/LFM2.5-1.2B-JP-ONNX";
+import * as webllm from "https://esm.run/@mlc-ai/web-llm";
 
 const SYSTEM_PROMPT = `あなたは日本語ネイティブとして会話するAIです。返答は必ず自然な日本語のみで行い、英単語や他言語の混入、不自然な文法・崩れた文字列は避けてください。1文を長くしすぎず、読みやすい範囲で区切ってください。
 
@@ -308,8 +310,7 @@ const els = {
   sendBtn: document.getElementById('sendBtn'),
 };
 
-let tokenizer = null;
-let model = null;
+let engine = null;
 let history = [{ role: "system", content: SYSTEM_PROMPT }];
 let generating = false;
 
@@ -361,23 +362,32 @@ async function initEngine(){
   els.loadWrap.classList.add('show');
   setStatus('loading', '起きる準備中…');
 
-  try{
-    const onProgress = (p) => {
-      // transformers.js progress events: {status, file, progress, loaded, total}
-      if(p.status === 'progress' && typeof p.progress === 'number'){
-        const pct = Math.round(p.progress);
-        els.barFill.style.width = pct + '%';
-        els.loadMsg.textContent = `${p.file || 'モデル'} を読み込み中…（${pct}%）`;
-      } else if(p.status){
-        els.loadMsg.textContent = p.status + '…';
-      }
-    };
+  // file:// で直接開かれている場合はモジュール/WASM取得がブロックされ、
+  // タブごと落ちる(灰色クラッシュ)原因になるので先に弾く
+  if(location.protocol === 'file:'){
+    setStatus('err', '起動失敗');
+    els.loadMsg.textContent = 'file:// では動作しません';
+    els.initBtn.disabled = false;
+    addRow('system', 'このページを直接ダブルクリックで開いていませんか？ file:// からだとモデルの読み込みがブロックされてクラッシュすることがあります。ローカルサーバー（例: VSCodeの Live Server、または `npx serve` / `python -m http.server` をこのフォルダで実行）か、GitHub Pages上で開いてください。');
+    return;
+  }
+  if(!('gpu' in navigator)){
+    setStatus('err', '起動失敗');
+    els.loadMsg.textContent = 'WebGPU非対応です';
+    els.initBtn.disabled = false;
+    addRow('system', 'お使いのブラウザがWebGPUに対応していないようです。最新のChromeまたはEdgeでお試しください。');
+    return;
+  }
 
-    tokenizer = await AutoTokenizer.from_pretrained(MODEL_ID, { progress_callback: onProgress });
-    model = await AutoModelForCausalLM.from_pretrained(MODEL_ID, {
-      dtype: "q4",
-      device: "webgpu",
-      progress_callback: onProgress,
+  try{
+    const modelId = els.modelSelect.value;
+    els.modelSelect.disabled = true;
+    engine = await webllm.CreateMLCEngine(modelId, {
+      initProgressCallback: (p) => {
+        const pct = Math.round((p.progress || 0) * 100);
+        els.barFill.style.width = pct + '%';
+        els.loadMsg.textContent = (p.text || '読み込み中…') + `（${pct}%）`;
+      }
     });
 
     els.initBtn.style.display = 'none';
@@ -392,13 +402,14 @@ async function initEngine(){
     setStatus('err', '起動失敗');
     els.loadMsg.textContent = 'エラー: ' + (err?.message || err);
     els.initBtn.disabled = false;
-    addRow('system', 'モデルの起動に失敗しました。このブラウザがWebGPUに対応しているかご確認ください（Chrome / Edge 最新版を推奨）。');
+    els.modelSelect.disabled = false;
+    addRow('system', 'モデルの起動に失敗しました。コンソール(F12)にエラー詳細が出ています。ローカルサーバー経由で開いているか、WebGPU対応ブラウザかをご確認ください。メモリ不足の場合は、もう少し小さいモデルをお試しください。');
   }
 }
 
 async function sendMessage(){
   const text = els.input.value.trim();
-  if(!text || generating || !model || !tokenizer) return;
+  if(!text || generating || !engine) return;
 
   addRow('user', text);
   history.push({ role: "user", content: text });
@@ -411,38 +422,29 @@ async function sendMessage(){
   addTyping();
 
   try{
-    const inputs = tokenizer.apply_chat_template(history, {
-      add_generation_prompt: true,
-      return_dict: true,
+    const stream = await engine.chat.completions.create({
+      messages: history,
+      stream: true,
+      temperature: 0.6,
+      top_p: 0.9,
+      frequency_penalty: 0.3,
+      presence_penalty: 0.2,
+      max_tokens: 512,
     });
 
     let full = '';
     let bubble = null;
-    const streamer = new TextStreamer(tokenizer, {
-      skip_prompt: true,
-      skip_special_tokens: true,
-      callback_function: (piece) => {
-        if(!piece) return;
-        if(!bubble){
-          removeTyping();
-          bubble = addRow('ai', '');
-        }
-        full += piece;
-        bubble.textContent = full;
-        els.log.scrollTop = els.log.scrollHeight;
+    for await (const chunk of stream){
+      const delta = chunk.choices?.[0]?.delta?.content || '';
+      if(!delta) continue;
+      if(!bubble){
+        removeTyping();
+        bubble = addRow('ai', '');
       }
-    });
-
-    await model.generate({
-      ...inputs,
-      max_new_tokens: 512,
-      do_sample: true,
-      temperature: 0.6,
-      top_p: 0.9,
-      repetition_penalty: 1.15,
-      streamer,
-    });
-
+      full += delta;
+      bubble.textContent = full;
+      els.log.scrollTop = els.log.scrollHeight;
+    }
     removeTyping();
     if(!full){
       full = 'すみません、うまく言葉が出てきませんでした…もう一度送ってもらえますか？';
